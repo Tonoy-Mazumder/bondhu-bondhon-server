@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
 
 const app = express();
@@ -29,13 +29,25 @@ app.get("/", (req, res) => {
 });
 
 // http://localhost:5000/events
-
+// all events api
 app.get("/events", async (req, res) => {
   try {
     const events = await eventsCollection.find({}).toArray();
     res.status(200).send(events);
   } catch (error) {
     res.status(500).send({ message: "Failed to fetch events" });
+  }
+});
+
+//http://localhost:5000/event/:id
+// single event details api
+app.get("/events/:id", async (req, res) => {
+  const { id } = req.params;
+  const event = await eventsCollection.findOne({ _id: new ObjectId(id) });
+  if (event) {
+    res.status(200).send(event);
+  } else {
+    res.status(404).send({ message: "Event not found" });
   }
 });
 
