@@ -39,7 +39,7 @@ app.get("/events", async (req, res) => {
   }
 });
 
-//http://localhost:5000/event/:id
+//http://localhost:5000/events/:id
 // single event details api
 app.get("/events/:id", async (req, res) => {
   const { id } = req.params;
@@ -50,6 +50,18 @@ app.get("/events/:id", async (req, res) => {
     res.status(404).send({ message: "Event not found" });
   }
 });
+// http://localhost:5000/create-events  (POST)
+// create event api
+app.post("/create-events", async (req, res) => {
+const event =  req.body;
+  try {
+    const result = await eventsCollection.insertOne(event);
+    res.status(201).send({ message: "Event created successfully", eventId: result.insertedId });
+  } catch (error) {
+    res.status(500).send({ message: "Failed to create event" });
+  }
+
+})
 
 app.listen(port, () => {
   console.log(`http://localhost:${port}`);
