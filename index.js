@@ -73,7 +73,13 @@ app.delete("/events/:id", async (req, res) => {
   await eventsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
   res.send({ message: "Event deleted" });
 });
-
+app.patch("/events/:id", async (req, res) => {
+  await eventsCollection.updateOne(
+    { _id: new ObjectId(req.params.id) },
+    { $set: req.body }
+  );
+  res.send({ message: "Event updated" });
+});
 app.listen(port, () => {
   console.log(`http://localhost:${port}`);
 });
