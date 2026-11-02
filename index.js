@@ -62,6 +62,17 @@ const event =  req.body;
   }
 
 })
+app.get("/my-events", async (req, res) => {
+  const events = await eventsCollection
+    .find({ organizerId: req.query.userId })
+    .toArray();
+  res.send(events);
+});
+
+app.delete("/events/:id", async (req, res) => {
+  await eventsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+  res.send({ message: "Event deleted" });
+});
 
 app.listen(port, () => {
   console.log(`http://localhost:${port}`);
