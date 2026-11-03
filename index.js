@@ -1,15 +1,19 @@
+
 import express from "express";
 import cors from "cors";
 import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
 import { jwtVerify, createRemoteJWKSet } from "jose";
+
 const app = express();
+
 app.use(
   cors({
     origin: process.env.FRONTEND_URL,
     credentials: true,
   }),
 );
+
 app.use(express.json());
 
 const port = process.env.PORT || 5000;
@@ -28,8 +32,22 @@ const eventsCollection = db.collection("events");
 
 const AUTH_BASE_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
-const JWKS = createRemoteJWKSet(new URL(`${AUTH_BASE_URL}/api/auth/jwks`));
+const JWKS = createRemoteJWKSet(
+  new URL(`${AUTH_BASE_URL}/api/auth/jwks`),
+);
 
+// Allowed event categories
+const EVENT_TYPES = [
+  "Environment",
+  "Community Service",
+  "Education",
+  "Health",
+  "Donation",
+  "Animal Welfare",
+  "Other",
+];
+
+// Authentication middleware
 async function requireAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
@@ -109,19 +127,26 @@ app.get("/events/:id", async (req, res) => {
 });
 
 // Create event
-
 app.post("/create-events", requireAuth, async (req, res) => {
   try {
-    const { title, description, category, image, location, date, capacity } =
-      req.body;
+    const {
+      title,
+      description,
+      category,
+      image,
+      location,
+      date,
+      capacity,
+    } = req.body;
 
-    // Basic validation
     if (
-      !title ||
-      !description ||
-      !category ||
-      !location ||
-      !date ||
+      typeof title !== "string" ||
+      title.trim().length < 3 ||
+      typeof description !== "string" ||
+      description.trim().length < 10 ||
+      !EVENT_TYPES.includes(category) ||
+      typeof location !== "string" ||
+      location.trim().length < 3 ||
       !Number.isInteger(capacity) ||
       capacity < 1 ||
       capacity > 10000
@@ -131,6 +156,26 @@ app.post("/create-events", requireAuth, async (req, res) => {
       });
     }
 
+    // Image URL validation
+    if (image !== undefined && image !== "") {
+      try {
+        const imageUrl = new URL(image);
+
+        if (
+          typeof image !== "string" ||
+          !["http:", "https:"].includes(imageUrl.protocol)
+        ) {
+          return res.status(400).send({
+            message: "Please provide a valid image URL",
+          });
+        }
+      } catch {
+        return res.status(400).send({
+          message: "Please provide a valid image URL",
+        });
+      }
+    }
+
     // Date format validation
     if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).send({
@@ -138,7 +183,6 @@ app.post("/create-events", requireAuth, async (req, res) => {
       });
     }
 
-    // Check actual calendar date
     const parsedDate = new Date(`${date}T00:00:00.000Z`);
 
     if (
@@ -150,7 +194,7 @@ app.post("/create-events", requireAuth, async (req, res) => {
       });
     }
 
-    // Get today's date in Bangladesh timezone
+    // Bangladesh timezone date
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Dhaka",
       year: "numeric",
@@ -158,31 +202,28 @@ app.post("/create-events", requireAuth, async (req, res) => {
       day: "2-digit",
     }).format(new Date());
 
-    // Only future dates allowed
     if (date <= today) {
       return res.status(400).send({
         message: "Event date must be in the future",
       });
     }
 
-    // Create event
     const event = {
-      title,
-      description,
+      title: title.trim(),
+      description: description.trim(),
       category,
-      image: image || "",
-      location,
+      image: image?.trim() || "",
+      location: location.trim(),
       date,
       capacity,
       joinedCount: 0,
       participants: [],
-
       organizerId: req.user.id,
       organizerName: req.user.name,
       organizerImage: req.user.image || "",
-
       createdAt: new Date().toISOString(),
     };
+
     const result = await eventsCollection.insertOne(event);
 
     res.status(201).send({
@@ -239,15 +280,15 @@ app.delete("/events/:id", requireAuth, async (req, res) => {
       message: "Event deleted successfully",
     });
   } catch (error) {
-    console.error(error);
+    console.error("Delete event error:", error);
 
     res.status(500).send({
       message: "Failed to delete event",
     });
   }
 });
-// Update event
 
+// Update event
 app.patch("/events/:id", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -282,7 +323,89 @@ app.patch("/events/:id", requireAuth, async (req, res) => {
       });
     }
 
-    // Validate date if provided
+    // Title validation
+    if (
+      updateData.title !== undefined &&
+      (typeof updateData.title !== "string" ||
+        updateData.title.trim().length < 3)
+    ) {
+      return res.status(400).send({
+        message: "Title must be at least 3 characters",
+      });
+    }
+
+    if (updateData.title !== undefined) {
+      updateData.title = updateData.title.trim();
+    }
+
+    // Description validation
+    if (
+      updateData.description !== undefined &&
+      (typeof updateData.description !== "string" ||
+        updateData.description.trim().length < 10)
+    ) {
+      return res.status(400).send({
+        message: "Description must be at least 10 characters",
+      });
+    }
+
+    if (updateData.description !== undefined) {
+      updateData.description = updateData.description.trim();
+    }
+
+    // Category validation
+    if (
+      updateData.category !== undefined &&
+      !EVENT_TYPES.includes(updateData.category)
+    ) {
+      return res.status(400).send({
+        message: "Please select a valid event category",
+      });
+    }
+
+    // Image URL validation
+    if (updateData.image !== undefined) {
+      if (typeof updateData.image !== "string") {
+        return res.status(400).send({
+          message: "Invalid image URL",
+        });
+      }
+
+      if (updateData.image.trim() !== "") {
+        try {
+          const imageUrl = new URL(updateData.image.trim());
+
+          if (!["http:", "https:"].includes(imageUrl.protocol)) {
+            return res.status(400).send({
+              message: "Invalid image URL",
+            });
+          }
+        } catch {
+          return res.status(400).send({
+            message: "Invalid image URL",
+          });
+        }
+      }
+
+      updateData.image = updateData.image.trim();
+    }
+
+    // Location validation
+    if (
+      updateData.location !== undefined &&
+      (typeof updateData.location !== "string" ||
+        updateData.location.trim().length < 3)
+    ) {
+      return res.status(400).send({
+        message: "Please provide a valid event location",
+      });
+    }
+
+    if (updateData.location !== undefined) {
+      updateData.location = updateData.location.trim();
+    }
+
+    // Date validation
     if (updateData.date !== undefined) {
       const date = updateData.date;
 
@@ -317,17 +440,19 @@ app.patch("/events/:id", requireAuth, async (req, res) => {
       }
     }
 
-    // Validate capacity if provided
+    // Capacity validation
     if (updateData.capacity !== undefined) {
-      const capacity = Number(updateData.capacity);
+      const capacity = updateData.capacity;
 
-      if (!Number.isInteger(capacity) || capacity < 1 || capacity > 10000) {
+      if (
+        !Number.isInteger(capacity) ||
+        capacity < 1 ||
+        capacity > 10000
+      ) {
         return res.status(400).send({
-          message: "Invalid participant capacity",
+          message: "Capacity must be between 1 and 10000",
         });
       }
-
-      updateData.capacity = capacity;
     }
 
     const result = await eventsCollection.updateOne(
@@ -362,7 +487,6 @@ app.patch("/events/:id", requireAuth, async (req, res) => {
 });
 
 // Join event
-
 app.post("/events/:id/join", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -437,7 +561,6 @@ app.post("/events/:id/join", requireAuth, async (req, res) => {
 });
 
 // Joined events
-
 app.get("/joined-events", requireAuth, async (req, res) => {
   try {
     const events = await eventsCollection
@@ -455,7 +578,6 @@ app.get("/joined-events", requireAuth, async (req, res) => {
 });
 
 // Cancel joined event
-
 app.delete("/events/:id/join", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -471,6 +593,7 @@ app.delete("/events/:id/join", requireAuth, async (req, res) => {
       {
         _id: new ObjectId(id),
         participants: userId,
+        joinedCount: { $gt: 0 },
       },
       {
         $pull: { participants: userId },
@@ -500,3 +623,5 @@ app.delete("/events/:id/join", requireAuth, async (req, res) => {
 app.listen(port, () => {
   console.log(`http://localhost:${port}`);
 });
+
+export default app;
