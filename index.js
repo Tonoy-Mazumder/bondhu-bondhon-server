@@ -7,10 +7,16 @@ import { jwtVerify, createRemoteJWKSet } from "jose";
 
 const app = express();
 
+const FRONTEND_URL = (
+  process.env.FRONTEND_URL || "http://localhost:3000"
+).replace(/\/$/, "");
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL,
+    origin: FRONTEND_URL,
     credentials: true,
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
 
@@ -30,7 +36,7 @@ const mongoClient = await connectToMongoDB();
 const db = mongoClient.db("bondhu-bondhon");
 const eventsCollection = db.collection("events");
 
-const AUTH_BASE_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+const AUTH_BASE_URL = FRONTEND_URL;
 
 const JWKS = createRemoteJWKSet(
   new URL(`${AUTH_BASE_URL}/api/auth/jwks`),
