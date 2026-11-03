@@ -381,23 +381,30 @@ app.patch("/events/:id", requireAuth, async (req, res) => {
 });
 
 // Join event
-app.post("/events/:id/join", async (req, res) => {
+
+app.post("/events/:id/join", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
+    const userId = req.user.id;
 
     if (!ObjectId.isValid(id)) {
-      return res.status(400).send({ message: "Invalid event ID" });
+      return res.status(400).send({
+        message: "Invalid event ID",
+      });
     }
 
-    if (!userId) {
-      return res.status(400).send({ message: "User ID is required" });
-    }
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Dhaka",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
 
     const result = await eventsCollection.updateOne(
       {
         _id: new ObjectId(id),
         participants: { $ne: userId },
+        date: { $gt: today },
         $expr: {
           $lt: [
             { $ifNull: ["$joinedCount", 0] },
@@ -417,7 +424,15 @@ app.post("/events/:id/join", async (req, res) => {
       });
 
       if (!event) {
-        return res.status(404).send({ message: "Event not found" });
+        return res.status(404).send({
+          message: "Event not found",
+        });
+      }
+
+      if (event.date <= today) {
+        return res.status(400).send({
+          message: "This event is no longer available",
+        });
       }
 
       if (event.participants?.includes(userId)) {
@@ -426,40 +441,54 @@ app.post("/events/:id/join", async (req, res) => {
         });
       }
 
-      return res.status(400).send({ message: "Event is full" });
+      return res.status(400).send({
+        message: "Event is full",
+      });
     }
 
-    res.status(200).send({ message: "Joined event successfully" });
+    res.status(200).send({
+      message: "Joined event successfully",
+    });
   } catch (error) {
-    res.status(500).send({ message: "Failed to join event" });
+    console.error("Join event error:", error);
+
+    res.status(500).send({
+      message: "Failed to join event",
+    });
   }
 });
 
+
 // Joined events
-app.get("/joined-events", async (req, res) => {
+
+app.get("/joined-events", requireAuth, async (req, res) => {
   try {
     const events = await eventsCollection
-      .find({ participants: req.query.userId })
+      .find({ participants: req.user.id })
       .toArray();
 
     res.status(200).send(events);
   } catch (error) {
-    res.status(500).send({ message: "Failed to fetch joined events" });
+    console.error("Joined events error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch joined events",
+    });
   }
 });
 
+
 // Cancel joined event
-app.delete("/events/:id/join", async (req, res) => {
+
+app.delete("/events/:id/join", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
+    const userId = req.user.id;
 
     if (!ObjectId.isValid(id)) {
-      return res.status(400).send({ message: "Invalid event ID" });
-    }
-
-    if (!userId) {
-      return res.status(400).send({ message: "User ID is required" });
+      return res.status(400).send({
+        message: "Invalid event ID",
+      });
     }
 
     const result = await eventsCollection.updateOne(
@@ -483,11 +512,14 @@ app.delete("/events/:id/join", async (req, res) => {
       message: "Your spot has been cancelled successfully",
     });
   } catch (error) {
+    console.error("Cancel join error:", error);
+
     res.status(500).send({
       message: "Failed to cancel your spot",
     });
   }
 });
+
 
 // Start server
 app.listen(port, () => {
