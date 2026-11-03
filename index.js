@@ -5,7 +5,12 @@ import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
 
 const app = express();
-app.use(cors());
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL,
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 const port = process.env.PORT || 5000;
@@ -21,6 +26,43 @@ export async function connectToMongoDB() {
 const mongoClient = await connectToMongoDB();
 const db = mongoClient.db("bondhu-bondhon");
 const eventsCollection = db.collection("events");
+
+async function requireAuth(req, res, next) {
+  try {
+    const response = await fetch(
+      `${process.env.FRONTEND_URL}/api/auth/get-session`,
+      {
+        headers: {
+          cookie: req.headers.cookie || "",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      return res.status(401).send({
+        message: "Unauthorized",
+      });
+    }
+
+    const data = await response.json();
+
+    if (!data?.user?.id) {
+      return res.status(401).send({
+        message: "Please login first",
+      });
+    }
+
+    req.user = data.user;
+
+    next();
+  } catch (error) {
+    console.error("Authentication error:", error);
+
+    return res.status(500).send({
+      message: "Authentication verification failed",
+    });
+  }
+}
 
 // Home
 app.get("/", (req, res) => {
@@ -61,9 +103,46 @@ app.get("/events/:id", async (req, res) => {
 });
 
 // Create event
-app.post("/create-events", async (req, res) => {
+app.post("/create-events", requireAuth, async (req, res) => {
   try {
-    const event = req.body;
+    const {
+      title,
+      description,
+      category,
+      image,
+      location,
+      date,
+      capacity,
+    } = req.body;
+
+    if (
+      !title ||
+      !description ||
+      !category ||
+      !location ||
+      !date ||
+      !Number.isInteger(capacity) ||
+      capacity < 1
+    ) {
+      return res.status(400).send({
+        message: "Please provide valid event information",
+      });
+    }
+
+    const event = {
+      title,
+      description,
+      category,
+      image: image || "",
+      location,
+      date,
+      capacity,
+      joinedCount: 0,
+      participants: [],
+      organizerId: req.user.id,
+      organizerName: req.user.name,
+      createdAt: new Date().toISOString(),
+    };
 
     const result = await eventsCollection.insertOne(event);
 
@@ -72,7 +151,11 @@ app.post("/create-events", async (req, res) => {
       eventId: result.insertedId,
     });
   } catch (error) {
-    res.status(500).send({ message: "Failed to create event" });
+    console.error("Create event error:", error);
+
+    res.status(500).send({
+      message: "Failed to create event",
+    });
   }
 });
 
