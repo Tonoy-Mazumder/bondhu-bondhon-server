@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
-
+import { jwtVerify, createRemoteJWKSet } from "jose";
 const app = express();
 app.use(
   cors({
@@ -27,39 +27,47 @@ const mongoClient = await connectToMongoDB();
 const db = mongoClient.db("bondhu-bondhon");
 const eventsCollection = db.collection("events");
 
+const AUTH_BASE_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+
+const JWKS = createRemoteJWKSet(
+  new URL(`${AUTH_BASE_URL}/api/auth/jwks`)
+);
+
 async function requireAuth(req, res, next) {
   try {
-    const response = await fetch(
-      `${process.env.FRONTEND_URL}/api/auth/get-session`,
-      {
-        headers: {
-          cookie: req.headers.cookie || "",
-        },
-      }
-    );
+    const authHeader = req.headers.authorization;
 
-    if (!response.ok) {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).send({
-        message: "Unauthorized",
+        message: "Unauthorized: Token missing",
       });
     }
 
-    const data = await response.json();
+    const token = authHeader.split(" ")[1];
 
-    if (!data?.user?.id) {
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: AUTH_BASE_URL,
+      audience: AUTH_BASE_URL,
+    });
+
+    if (!payload.sub) {
       return res.status(401).send({
-        message: "Please login first",
+        message: "Invalid token",
       });
     }
 
-    req.user = data.user;
+    req.user = {
+      id: payload.sub,
+      email: payload.email,
+      name: payload.name,
+    };
 
     next();
   } catch (error) {
-    console.error("Authentication error:", error);
+    console.error("JWT verification failed:", error);
 
-    return res.status(500).send({
-      message: "Authentication verification failed",
+    return res.status(401).send({
+      message: "Invalid or expired token",
     });
   }
 }
@@ -160,15 +168,17 @@ app.post("/create-events", requireAuth, async (req, res) => {
 });
 
 // My events
-app.get("/my-events", async (req, res) => {
+app.get("/my-events", requireAuth, async (req, res) => {
   try {
     const events = await eventsCollection
-      .find({ organizerId: req.query.userId })
+      .find({ organizerId: req.user.id })
       .toArray();
 
     res.status(200).send(events);
   } catch (error) {
-    res.status(500).send({ message: "Failed to fetch your events" });
+    res.status(500).send({
+      message: "Failed to fetch your events",
+    });
   }
 });
 
