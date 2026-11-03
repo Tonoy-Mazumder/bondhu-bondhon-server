@@ -111,6 +111,7 @@ app.get("/events/:id", async (req, res) => {
 });
 
 // Create event
+
 app.post("/create-events", requireAuth, async (req, res) => {
   try {
     const {
@@ -123,6 +124,7 @@ app.post("/create-events", requireAuth, async (req, res) => {
       capacity,
     } = req.body;
 
+    // Basic validation
     if (
       !title ||
       !description ||
@@ -130,13 +132,52 @@ app.post("/create-events", requireAuth, async (req, res) => {
       !location ||
       !date ||
       !Number.isInteger(capacity) ||
-      capacity < 1
+      capacity < 1 ||
+      capacity > 10000
     ) {
       return res.status(400).send({
         message: "Please provide valid event information",
       });
     }
 
+    // Date format validation
+    if (
+      typeof date !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(date)
+    ) {
+      return res.status(400).send({
+        message: "Invalid event date format",
+      });
+    }
+
+    // Check actual calendar date
+    const parsedDate = new Date(`${date}T00:00:00.000Z`);
+
+    if (
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.toISOString().slice(0, 10) !== date
+    ) {
+      return res.status(400).send({
+        message: "Invalid event date",
+      });
+    }
+
+    // Get today's date in Bangladesh timezone
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Dhaka",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+
+    // Only future dates allowed
+    if (date <= today) {
+      return res.status(400).send({
+        message: "Event date must be in the future",
+      });
+    }
+
+    // Create event
     const event = {
       title,
       description,
@@ -167,6 +208,7 @@ app.post("/create-events", requireAuth, async (req, res) => {
   }
 });
 
+
 // My events
 app.get("/my-events", requireAuth, async (req, res) => {
   try {
@@ -183,39 +225,158 @@ app.get("/my-events", requireAuth, async (req, res) => {
 });
 
 // Delete event
-app.delete("/events/:id", async (req, res) => {
+app.delete("/events/:id", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!ObjectId.isValid(id)) {
-      return res.status(400).send({ message: "Invalid event ID" });
+      return res.status(400).send({
+        message: "Invalid event ID",
+      });
     }
 
-    await eventsCollection.deleteOne({ _id: new ObjectId(id) });
+    const result = await eventsCollection.deleteOne({
+      _id: new ObjectId(id),
+      organizerId: req.user.id,
+    });
 
-    res.status(200).send({ message: "Event deleted" });
+    if (result.deletedCount === 0) {
+      return res.status(404).send({
+        message: "Event not found or you are not the owner",
+      });
+    }
+
+    res.status(200).send({
+      message: "Event deleted successfully",
+    });
   } catch (error) {
-    res.status(500).send({ message: "Failed to delete event" });
+    console.error(error);
+
+    res.status(500).send({
+      message: "Failed to delete event",
+    });
   }
 });
-
 // Update event
-app.patch("/events/:id", async (req, res) => {
+
+app.patch("/events/:id", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!ObjectId.isValid(id)) {
-      return res.status(400).send({ message: "Invalid event ID" });
+      return res.status(400).send({
+        message: "Invalid event ID",
+      });
     }
 
-    await eventsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: req.body }
+    const allowedFields = [
+      "title",
+      "description",
+      "category",
+      "image",
+      "location",
+      "date",
+      "capacity",
+    ];
+
+    const updateData = {};
+
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        updateData[field] = req.body[field];
+      }
+    });
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).send({
+        message: "No valid fields provided",
+      });
+    }
+
+    // Validate date if provided
+    if (updateData.date !== undefined) {
+      const date = updateData.date;
+
+      if (
+        typeof date !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(date)
+      ) {
+        return res.status(400).send({
+          message: "Invalid event date format",
+        });
+      }
+
+      const parsedDate = new Date(`${date}T00:00:00.000Z`);
+
+      if (
+        Number.isNaN(parsedDate.getTime()) ||
+        parsedDate.toISOString().slice(0, 10) !== date
+      ) {
+        return res.status(400).send({
+          message: "Invalid event date",
+        });
+      }
+
+      const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Dhaka",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+
+      if (date <= today) {
+        return res.status(400).send({
+          message: "Event date must be in the future",
+        });
+      }
+    }
+
+    // Validate capacity if provided
+    if (updateData.capacity !== undefined) {
+      const capacity = Number(updateData.capacity);
+
+      if (
+        !Number.isInteger(capacity) ||
+        capacity < 1 ||
+        capacity > 10000
+      ) {
+        return res.status(400).send({
+          message: "Invalid participant capacity",
+        });
+      }
+
+      updateData.capacity = capacity;
+    }
+
+    const result = await eventsCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+        organizerId: req.user.id,
+        ...(updateData.capacity !== undefined
+          ? { joinedCount: { $lte: updateData.capacity } }
+          : {}),
+      },
+      {
+        $set: updateData,
+      }
     );
 
-    res.status(200).send({ message: "Event updated" });
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message:
+          "Event not found, unauthorized, or capacity is too low",
+      });
+    }
+
+    res.status(200).send({
+      message: "Event updated successfully",
+    });
   } catch (error) {
-    res.status(500).send({ message: "Failed to update event" });
+    console.error("Update event error:", error);
+
+    res.status(500).send({
+      message: "Failed to update event",
+    });
   }
 });
 
