@@ -1,4 +1,3 @@
-
 import express from "express";
 import cors from "cors";
 import { MongoClient, ObjectId } from "mongodb";
@@ -9,7 +8,7 @@ app.use(
   cors({
     origin: process.env.FRONTEND_URL,
     credentials: true,
-  })
+  }),
 );
 app.use(express.json());
 
@@ -29,9 +28,7 @@ const eventsCollection = db.collection("events");
 
 const AUTH_BASE_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
-const JWKS = createRemoteJWKSet(
-  new URL(`${AUTH_BASE_URL}/api/auth/jwks`)
-);
+const JWKS = createRemoteJWKSet(new URL(`${AUTH_BASE_URL}/api/auth/jwks`));
 
 async function requireAuth(req, res, next) {
   try {
@@ -60,6 +57,7 @@ async function requireAuth(req, res, next) {
       id: payload.sub,
       email: payload.email,
       name: payload.name,
+      image: payload.image,
     };
 
     next();
@@ -114,15 +112,8 @@ app.get("/events/:id", async (req, res) => {
 
 app.post("/create-events", requireAuth, async (req, res) => {
   try {
-    const {
-      title,
-      description,
-      category,
-      image,
-      location,
-      date,
-      capacity,
-    } = req.body;
+    const { title, description, category, image, location, date, capacity } =
+      req.body;
 
     // Basic validation
     if (
@@ -141,10 +132,7 @@ app.post("/create-events", requireAuth, async (req, res) => {
     }
 
     // Date format validation
-    if (
-      typeof date !== "string" ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(date)
-    ) {
+    if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).send({
         message: "Invalid event date format",
       });
@@ -188,11 +176,13 @@ app.post("/create-events", requireAuth, async (req, res) => {
       capacity,
       joinedCount: 0,
       participants: [],
+
       organizerId: req.user.id,
       organizerName: req.user.name,
+      organizerImage: req.user.image || "",
+
       createdAt: new Date().toISOString(),
     };
-
     const result = await eventsCollection.insertOne(event);
 
     res.status(201).send({
@@ -207,7 +197,6 @@ app.post("/create-events", requireAuth, async (req, res) => {
     });
   }
 });
-
 
 // My events
 app.get("/my-events", requireAuth, async (req, res) => {
@@ -297,10 +286,7 @@ app.patch("/events/:id", requireAuth, async (req, res) => {
     if (updateData.date !== undefined) {
       const date = updateData.date;
 
-      if (
-        typeof date !== "string" ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(date)
-      ) {
+      if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return res.status(400).send({
           message: "Invalid event date format",
         });
@@ -335,11 +321,7 @@ app.patch("/events/:id", requireAuth, async (req, res) => {
     if (updateData.capacity !== undefined) {
       const capacity = Number(updateData.capacity);
 
-      if (
-        !Number.isInteger(capacity) ||
-        capacity < 1 ||
-        capacity > 10000
-      ) {
+      if (!Number.isInteger(capacity) || capacity < 1 || capacity > 10000) {
         return res.status(400).send({
           message: "Invalid participant capacity",
         });
@@ -358,13 +340,12 @@ app.patch("/events/:id", requireAuth, async (req, res) => {
       },
       {
         $set: updateData,
-      }
+      },
     );
 
     if (result.matchedCount === 0) {
       return res.status(404).send({
-        message:
-          "Event not found, unauthorized, or capacity is too low",
+        message: "Event not found, unauthorized, or capacity is too low",
       });
     }
 
@@ -406,16 +387,13 @@ app.post("/events/:id/join", requireAuth, async (req, res) => {
         participants: { $ne: userId },
         date: { $gt: today },
         $expr: {
-          $lt: [
-            { $ifNull: ["$joinedCount", 0] },
-            "$capacity",
-          ],
+          $lt: [{ $ifNull: ["$joinedCount", 0] }, "$capacity"],
         },
       },
       {
         $addToSet: { participants: userId },
         $inc: { joinedCount: 1 },
-      }
+      },
     );
 
     if (result.modifiedCount === 0) {
@@ -458,7 +436,6 @@ app.post("/events/:id/join", requireAuth, async (req, res) => {
   }
 });
 
-
 // Joined events
 
 app.get("/joined-events", requireAuth, async (req, res) => {
@@ -476,7 +453,6 @@ app.get("/joined-events", requireAuth, async (req, res) => {
     });
   }
 });
-
 
 // Cancel joined event
 
@@ -499,7 +475,7 @@ app.delete("/events/:id/join", requireAuth, async (req, res) => {
       {
         $pull: { participants: userId },
         $inc: { joinedCount: -1 },
-      }
+      },
     );
 
     if (result.modifiedCount === 0) {
@@ -519,7 +495,6 @@ app.delete("/events/:id/join", requireAuth, async (req, res) => {
     });
   }
 });
-
 
 // Start server
 app.listen(port, () => {
