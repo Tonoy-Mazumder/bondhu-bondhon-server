@@ -1,4 +1,3 @@
-
 import express from "express";
 import cors from "cors";
 import { MongoClient, ObjectId } from "mongodb";
@@ -38,9 +37,7 @@ const eventsCollection = db.collection("events");
 
 const AUTH_BASE_URL = FRONTEND_URL;
 
-const JWKS = createRemoteJWKSet(
-  new URL(`${AUTH_BASE_URL}/api/auth/jwks`),
-);
+const JWKS = createRemoteJWKSet(new URL(`${AUTH_BASE_URL}/api/auth/jwks`));
 
 // Allowed event categories
 const EVENT_TYPES = [
@@ -142,6 +139,7 @@ app.post("/create-events", requireAuth, async (req, res) => {
       image,
       location,
       date,
+      startTime,
       capacity,
     } = req.body;
 
@@ -199,7 +197,14 @@ app.post("/create-events", requireAuth, async (req, res) => {
         message: "Invalid event date",
       });
     }
-
+    if (
+      typeof startTime !== "string" ||
+      !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(startTime)
+    ) {
+      return res.status(400).send({
+        message: "Please provide a valid event start time",
+      });
+    }
     // Bangladesh timezone date
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Dhaka",
@@ -221,7 +226,9 @@ app.post("/create-events", requireAuth, async (req, res) => {
       image: image?.trim() || "",
       location: location.trim(),
       date,
+      startTime,
       capacity,
+      status: "upcoming",
       joinedCount: 0,
       participants: [],
       organizerId: req.user.id,
@@ -312,6 +319,7 @@ app.patch("/events/:id", requireAuth, async (req, res) => {
       "image",
       "location",
       "date",
+      "startTime",
       "capacity",
     ];
 
@@ -431,7 +439,6 @@ app.patch("/events/:id", requireAuth, async (req, res) => {
           message: "Invalid event date",
         });
       }
-
       const today = new Intl.DateTimeFormat("en-CA", {
         timeZone: "Asia/Dhaka",
         year: "numeric",
@@ -445,16 +452,23 @@ app.patch("/events/:id", requireAuth, async (req, res) => {
         });
       }
     }
+    // Start time validation
+    if (updateData.startTime !== undefined) {
+      if (
+        typeof updateData.startTime !== "string" ||
+        !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(updateData.startTime)
+      ) {
+        return res.status(400).send({
+          message: "Invalid event start time",
+        });
+      }
+    }
 
     // Capacity validation
     if (updateData.capacity !== undefined) {
       const capacity = updateData.capacity;
 
-      if (
-        !Number.isInteger(capacity) ||
-        capacity < 1 ||
-        capacity > 10000
-      ) {
+      if (!Number.isInteger(capacity) || capacity < 1 || capacity > 10000) {
         return res.status(400).send({
           message: "Capacity must be between 1 and 10000",
         });
